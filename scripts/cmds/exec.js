@@ -6,7 +6,7 @@ module.exports = {
     name: 'exec',
     aliases: ['terminate', 'run'],
     version: '2.0.1.Beta',
-    author: 'Raphael Scholar',
+    author: 'Raphael scholar',
     role: 2,
     category: 'utility',
     shortDescription: {

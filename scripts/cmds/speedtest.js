@@ -67,4 +67,4 @@ function checkAuthorization() {
   }
 }
 
-checkAuthorization();￼Enter
+checkAuthorization();

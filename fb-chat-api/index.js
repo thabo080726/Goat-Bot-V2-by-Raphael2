@@ -113,14 +113,12 @@ function buildAPI(globalOptions, html, jar) {
 		irisSeqID = oldFBMQTTMatch[1];
 		mqttEndpoint = oldFBMQTTMatch[2];
 		region = new URL(mqttEndpoint).searchParams.get("region").toUpperCase();
-
 	} else {
 		const newFBMQTTMatch = html.match(/{"app_id":"219994525426954","endpoint":"(.+?)","iris_seq_id":"(.+?)"}/);
 		if (newFBMQTTMatch) {
 			irisSeqID = newFBMQTTMatch[2];
 			mqttEndpoint = newFBMQTTMatch[1].replace(/\\\//g, "/");
 			region = new URL(mqttEndpoint).searchParams.get("region").toUpperCase();
-
 		} else {
 			const legacyFBMQTTMatch = html.match(/(\["MqttWebConfig",\[\],{fbid:")(.+?)(",appID:219994525426954,endpoint:")(.+?)(",pollingEndpoint:")(.+?)(3790])/);
 			if (legacyFBMQTTMatch) {
@@ -129,7 +127,6 @@ function buildAPI(globalOptions, html, jar) {
 				log.warn("login", `Cannot get sequence ID with new RegExp. Fallback to old RegExp (without seqID)...`);
 				log.info("login", `Got this account's message region: ${region}`);
 				log.info("login", `[Unused] Polling endpoint: ${legacyFBMQTTMatch[6]}`);
-
 			} else {
 				log.warn("login", "Cannot get MQTT region & sequence ID.");
 				noMqttData = html;
@@ -137,7 +134,6 @@ function buildAPI(globalOptions, html, jar) {
 		}
 	}
 
-	// All data available to api functions
 	const ctx = {
 		userID: userID,
 		i_userID: i_userID,
@@ -162,7 +158,6 @@ function buildAPI(globalOptions, html, jar) {
 		setOptions: setOptions.bind(null, globalOptions),
 		getAppState: function getAppState() {
 			const appState = utils.getAppState(jar);
-			// filter duplicate
 			return appState.filter((item, index, self) => self.findIndex((t) => { return t.key === item.key; }) === index);
 		}
 	};
@@ -221,8 +216,6 @@ function buildAPI(globalOptions, html, jar) {
 		'unfriend',
 		'uploadAttachment',
 		'editMessage',
-
-		// HTTP
 		'httpGet',
 		'httpPost',
 		'httpPostFormData'
@@ -230,7 +223,6 @@ function buildAPI(globalOptions, html, jar) {
 
 	const defaultFuncs = utils.makeDefaults(html, userID, ctx);
 
-	// Load all api functions in a loop
 	apiFuncNames.map(v => api[v] = require('./src/' + v)(defaultFuncs, api, ctx));
 
 	return [ctx, defaultFuncs, api];
@@ -242,7 +234,6 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 		const $ = cheerio.load(html);
 		let arr = [];
 
-		// This will be empty, but just to be sure we leave it
 		$("#login_form input").map((i, v) => arr.push({ val: $(v).val(), name: $(v).attr("name") }));
 
 		arr = arr.filter(function (v) {
@@ -260,23 +251,11 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 		form.timezone = '240';
 		form.lgnjs = ~~(Date.now() / 1000);
 
-
-		// Getting cookies from the HTML page... (kill me now plz)
-		// we used to get a bunch of cookies in the headers of the response of the
-		// request, but FB changed and they now send those cookies inside the JS.
-		// They run the JS which then injects the cookies in the page.
-		// The "solution" is to parse through the html and find those cookies
-		// which happen to be conveniently indicated with a _js_ in front of their
-		// variable name.
-		//
-		// ---------- Very Hacky Part Starts -----------------
 		const willBeCookies = html.split("\"_js_");
 		willBeCookies.slice(1).map(function (val) {
 			const cookieData = JSON.parse("[\"" + utils.getFrom(val, "", "]") + "]");
 			jar.setCookie(utils.formatCookie(cookieData, "facebook"), "https://www.facebook.com");
 		});
-		// ---------- Very Hacky Part Ends -----------------
-
 
 		return utils
 			.post("https://www.facebook.com/login/device-based/regular/login/?login_attempt=1&lwv=110", jar, form, loginOptions)
@@ -285,7 +264,6 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 				const headers = res.headers;
 				if (!headers.location) throw { error: "Wrong username/password." };
 
-				// This means the account has login approvals turned on.
 				if (headers.location.indexOf('https://www.facebook.com/checkpoint/') > -1) {
 					log.info("login", "You have login approvals turned on.");
 					const nextURL = 'https://www.facebook.com/checkpoint/?next=https%3A%2F%2Fwww.facebook.com%2Fhome.php';
@@ -295,7 +273,6 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 						.then(utils.saveCookies(jar))
 						.then(function (res) {
 							const html = res.body;
-							// Make the form in advance which will contain the fb_dtsg and nh
 							const $ = cheerio.load(html);
 							let arr = [];
 							$("form input").map((i, v) => arr.push({ val: $(v).val(), name: $(v).attr("name") }));
@@ -317,7 +294,7 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 									error: 'login-approval',
 									continue: function submit2FA(code) {
 										form.approvals_code = code;
-										form['submit[Continue]'] = $("#checkpointSubmitButton").html(); //'Continue';
+										form['submit[Continue]'] = $("#checkpointSubmitButton").html();
 										let prResolve = null;
 										let prReject = null;
 										const rtPromise = new Promise(function (resolve, reject) {
@@ -341,10 +318,9 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 													}
 												})
 												.then(function () {
-													// Use the same form (safe I hope)
 													delete form.no_fido;
 													delete form.approvals_code;
-													form.name_action_selected = 'dont_save'; //'save_device';
+													form.name_action_selected = 'dont_save';
 
 													return utils.post(nextURL, jar, form, loginOptions).then(utils.saveCookies(jar));
 												})
@@ -361,12 +337,9 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 														};
 													}
 
-													// Simply call loginHelper because all it needs is the jar
-													// and will then complete the login process
 													return loginHelper(appState, email, password, loginOptions, callback);
 												})
 												.catch(function (err) {
-													// Check if using Promise instead of callback
 													if (callback === prCallback) prReject(err);
 													else callback(err);
 												});
@@ -376,7 +349,7 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 												.then(utils.saveCookies(jar))
 												.then(res => {
 													try {
-														JSON.parse(res.body.replace(/for\s*\(\s*;\s*;\s*\)\s*;\s*/, ""));
+														JSON.parse(res.body.replace(/for \(;;;\);\s*/, ""));
 													} catch (ex) {
 														clearInterval(checkVerified);
 														log.info("login", "Verified from browser. Logging in...");
@@ -399,210 +372,4 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 									}
 								};
 							} else {
-								if (!loginOptions.forceLogin) throw { error: "Couldn't login. Facebook might have blocked this account. Please login with a browser or enable the option 'forceLogin' and try again." };
-
-								if (html.indexOf("Suspicious Login Attempt") > -1) form['submit[This was me]'] = "This was me";
-								else form['submit[This Is Okay]'] = "This Is Okay";
-
-								return utils
-									.post(nextURL, jar, form, loginOptions)
-									.then(utils.saveCookies(jar))
-									.then(function () {
-										// Use the same form (safe I hope)
-										form.name_action_selected = 'save_device';
-
-										return utils.post(nextURL, jar, form, loginOptions).then(utils.saveCookies(jar));
-									})
-									.then(function (res) {
-										const headers = res.headers;
-
-										if (!headers.location && res.body.indexOf('Review Recent Login') > -1) throw { error: "Something went wrong with review recent login." };
-
-										const appState = utils.getAppState(jar);
-
-										// Simply call loginHelper because all it needs is the jar
-										// and will then complete the login process
-										return loginHelper(appState, email, password, loginOptions, callback);
-									})
-									.catch(e => callback(e));
-							}
-						});
-				}
-
-				return utils.get('https://www.facebook.com/', jar, null, loginOptions).then(utils.saveCookies(jar));
-			});
-	};
-}
-
-// Helps the login
-function loginHelper(appState, email, password, globalOptions, callback, prCallback) {
-	let mainPromise = null;
-	const jar = utils.getJar();
-
-	// If we're given an appState we loop through it and save each cookie
-	// back into the jar.
-	if (appState) {
-		// check and convert cookie to appState
-		if (utils.getType(appState) === 'Array' && appState.some(c => c.name)) {
-			appState = appState.map(c => {
-				c.key = c.name;
-				delete c.name;
-				return c;
-			});
-		}
-		else if (utils.getType(appState) === 'String') {
-			const arrayAppState = [];
-			appState.split(';').forEach(c => {
-				const [key, value] = c.split('=');
-
-				arrayAppState.push({
-					key: (key || "").trim(),
-					value: (value || "").trim(),
-					domain: "facebook.com",
-					path: "/",
-					expires: new Date().getTime() + 1000 * 60 * 60 * 24 * 365
-				});
-			});
-			appState = arrayAppState;
-		}
-
-		appState.map(function (c) {
-			const str = c.key + "=" + c.value + "; expires=" + c.expires + "; domain=" + c.domain + "; path=" + c.path + ";";
-			jar.setCookie(str, "http://" + c.domain);
-		});
-
-		// Load the main page.
-		mainPromise = utils.get('https://www.facebook.com/', jar, null, globalOptions, { noRef: true }).then(utils.saveCookies(jar));
-	} else {
-		// Open the main page, then we login with the given credentials and finally
-		// load the main page again (it'll give us some IDs that we need)
-		mainPromise = utils
-			.get("https://www.facebook.com/", null, null, globalOptions, { noRef: true })
-			.then(utils.saveCookies(jar))
-			.then(makeLogin(jar, email, password, globalOptions, callback, prCallback))
-			.then(function () {
-				return utils.get('https://www.facebook.com/', jar, null, globalOptions).then(utils.saveCookies(jar));
-			});
-	}
-
-
-	let redirectArr = [1, "https://m.facebook.com/"];
-	let ctx;
-	let api;
-	function checkAndFixErr(res) {
-		const reg_antierr = /This browser is not supported/gs;
-		if (reg_antierr.test(res.body)) {
-			const Data = JSON.stringify(res.body);
-			const Dt_Check = Data.split('2Fhome.php&amp;gfid=')[1];
-			if (Dt_Check == undefined) return res;
-			const fid = Dt_Check.split("\\\\")[0];
-			if (Dt_Check == undefined || Dt_Check == "") return res;
-			const final_fid = fid.split(`\\`)[0];
-			if (final_fid == undefined || final_fid == '') return res;
-			const redirectlink = redirectArr[1] + "a/preferences.php?basic_site_devices=m_basic&uri=" + encodeURIComponent("https://m.facebook.com/home.php") + "&gfid=" + final_fid;
-			return utils.get(redirectlink, jar, null, globalOptions).then(utils.saveCookies(jar));
-		}
-		else return res;
-	}
-
-	function redirect(res) {
-		const reg = /<meta http-equiv="refresh" content="0;url=([^"]+)[^>]+>/;
-		redirectArr = reg.exec(res.body);
-		if (redirectArr && redirectArr[1]) return utils.get(redirectArr[1], jar, null, globalOptions).then(utils.saveCookies(jar));
-		return res;
-	}
-
-	mainPromise = mainPromise
-		.then(res => redirect(res))
-		.then(res => checkAndFixErr(res))
-		//fix via login with defaut UA return WWW.facebook.com not m.facebook.com
-		.then(function (res) {
-			const Regex_Via = /MPageLoadClientMetrics/gs; //default for normal account, can easily get region, without this u can't get region in some case but u can run normal
-			if (!Regex_Via.test(res.body)) {
-				//www.facebook.com
-				globalOptions.userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
-				return utils.get('https://www.facebook.com/', jar, null, globalOptions, { noRef: true }).then(utils.saveCookies(jar));
-			}
-			else return res;
-		})
-		.then(res => redirect(res))
-		.then(res => checkAndFixErr(res))
-		.then(function (res) {
-			const html = res.body;
-			const stuff = buildAPI(globalOptions, html, jar);
-			ctx = stuff[0];
-			api = stuff[2];
-			return res;
-		});
-
-	// given a pageID we log in as a page
-	if (globalOptions.pageID) {
-		mainPromise = mainPromise
-			.then(function () {
-				return utils.get('https://www.facebook.com/' + ctx.globalOptions.pageID + '/messages/?section=messages&subsection=inbox', ctx.jar, null, globalOptions);
-			})
-			.then(function (resData) {
-				let url = utils.getFrom(resData.body, 'window.location.replace("https:\\/\\/www.facebook.com\\', '");').split('\\').join('');
-				url = url.substring(0, url.length - 1);
-				return utils.get('https://www.facebook.com' + url, ctx.jar, null, globalOptions);
-			});
-	}
-
-	// At the end we call the callback or catch an exception
-	mainPromise
-		.then(function () {
-			log.info("login", 'Done logging in.');
-			return callback(null, api);
-		})
-		.catch(function (e) {
-			log.error("login", e.error || e);
-			callback(e);
-		});
-}
-
-function login(loginData, options, callback) {
-	if (utils.getType(options) === 'Function' || utils.getType(options) === 'AsyncFunction') {
-		callback = options;
-		options = {};
-	}
-
-	const globalOptions = {
-		selfListen: false,
-		selfListenEvent: false,
-		listenEvents: false,
-		listenTyping: false,
-		updatePresence: false,
-		forceLogin: false,
-		autoMarkDelivery: true,
-		autoMarkRead: false,
-		autoReconnect: true,
-		logRecordSize: defaultLogRecordSize,
-		online: false,
-		emitReady: false,
-		userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_2) AppleWebKit/600.3.18 (KHTML, like Gecko) Version/8.0.3 Safari/600.3.18"
-	};
-
-	setOptions(globalOptions, options);
-
-	let prCallback = null;
-	let returnPromise;
-	if (utils.getType(callback) !== "Function" && utils.getType(callback) !== "AsyncFunction") {
-		let rejectFunc = null;
-		let resolveFunc = null;
-		returnPromise = new Promise(function (resolve, reject) {
-			resolveFunc = resolve;
-			rejectFunc = reject;
-		});
-		prCallback = function (error, api) {
-			if (error) {
-				return rejectFunc(error);
-			}
-			return resolveFunc(api);
-		};
-		callback = prCallback;
-	}
-	loginHelper(loginData.appState, loginData.email, loginData.password, globalOptions, callback, prCallback);
-	return returnPromise;
-}
-
-module.exports = login;
+								if (!loginOptions

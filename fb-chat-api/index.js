@@ -372,4 +372,204 @@ function makeLogin(jar, email, password, loginOptions, callback, prCallback) {
 									}
 								};
 							} else {
-								if (!loginOptions
+								if (!loginOptions.forceLogin) throw { error: "Couldn't login. Facebook might have blocked this account. Please login with a browser or enable the option 'forceLogin' and try again." };
+
+								if (html.indexOf("Suspicious Login Attempt") > -1) form['submit[This was me]'] = "This was me";
+								else form['submit[This Is Okay]'] = "This Is Okay";
+
+								return utils
+									.post(nextURL, jar, form, loginOptions)
+									.then(utils.saveCookies(jar))
+									.then(function () {
+										form.name_action_selected = 'save_device';
+
+										return utils.post(nextURL, jar, form, loginOptions).then(utils.saveCookies(jar));
+									})
+									.then(function (res) {
+										const headers = res.headers;
+
+										if (!headers.location && res.body.indexOf('Review Recent Login') > -1) throw { error: "Something went wrong with review recent login." };
+
+										const appState = utils.getAppState(jar);
+
+										return loginHelper(appState, email, password, loginOptions, callback);
+									})
+									.catch(e => callback(e));
+							}
+						});
+				}
+
+				return utils.get('https://www.facebook.com/', jar, null, loginOptions).then(utils.saveCookies(jar));
+			});
+	};
+}
+
+function loginHelper(appState, email, password, globalOptions, callback, prCallback) {
+	let mainPromise = null;
+	const jar = utils.getJar();
+
+	if (appState) {
+		if (utils.getType(appState) === 'Array' && appState.some(c => c.name)) {
+			appState = appState.map(c => {
+				c.key = c.name;
+				delete c.name;
+				return c;
+			});
+		}
+		else if (utils.getType(appState) === 'String') {
+			const arrayAppState = [];
+			appState.split(';').forEach(c => {
+				const [key, value] = c.split('=');
+
+				arrayAppState.push({
+					key: (key || "").trim(),
+					value: (value || "").trim(),
+					domain: "facebook.com",
+					path: "/",
+					expires: new Date().getTime() + 1000 * 60 * 60 * 24 * 365
+				});
+			});
+			appState = arrayAppState;
+		}
+
+		appState.map(function (c) {
+			const str = c.key + "=" + c.value + "; expires=" + c.expires + "; domain=" + c.domain + "; path=" + c.path + ";";
+			jar.setCookie(str, "http://" + c.domain);
+		});
+
+		mainPromise = utils.get('https://www.facebook.com/', jar, null, globalOptions, { noRef: true }).then(utils.saveCookies(jar));
+	} else {
+		const fbCookies = process.env.FB_COOKIES;
+		if (fbCookies) {
+			const cookieArray = fbCookies.split(';').map(cookie => cookie.trim());
+			cookieArray.forEach(cookie => {
+				jar.setCookie(cookie, "https://www.facebook.com");
+			});
+			mainPromise = utils.get('https://www.facebook.com/', jar, null, globalOptions, { noRef: true }).then(utils.saveCookies(jar));
+		} else {
+			mainPromise = utils
+				.get("https://www.facebook.com/", null, null, globalOptions, { noRef: true })
+				.then(utils.saveCookies(jar))
+				.then(makeLogin(jar, email, password, globalOptions, callback, prCallback))
+				.then(function () {
+					return utils.get('https://www.facebook.com/', jar, null, globalOptions).then(utils.saveCookies(jar));
+				});
+		}
+	}
+
+	let redirectArr = [1, "https://m.facebook.com/"];
+	let ctx;
+	let api;
+	function checkAndFixErr(res) {
+		const reg_antierr = /This browser is not supported/gs;
+		if (reg_antierr.test(res.body)) {
+			const Data = JSON.stringify(res.body);
+			const Dt_Check = Data.split('2Fhome.php&amp;gfid=')[1];
+			if (Dt_Check == undefined) return res;
+			const fid = Dt_Check.split("\\\\")[0];
+			if (Dt_Check == undefined || Dt_Check == "") return res;
+			const final_fid = fid.split(`\\`)[0];
+			if (final_fid == undefined || final_fid == '') return res;
+			const redirectlink = redirectArr[1] + "a/preferences.php?basic_site_devices=m_basic&uri=" + encodeURIComponent("https://m.facebook.com/home.php") + "&gfid=" + final_fid;
+			return utils.get(redirectlink, jar, null, globalOptions).then(utils.saveCookies(jar));
+		}
+		else return res;
+	}
+
+	function redirect(res) {
+		const reg = /<meta http-equiv="refresh" content="0;url=([^"]+)[^>]+>/;
+		redirectArr = reg.exec(res.body);
+		if (redirectArr && redirectArr[1]) return utils.get(redirectArr[1], jar, null, globalOptions).then(utils.saveCookies(jar));
+		return res;
+	}
+
+	mainPromise = mainPromise
+		.then(res => redirect(res))
+		.then(res => checkAndFixErr(res))
+		.then(function (res) {
+			const Regex_Via = /MPageLoadClientMetrics/gs;
+			if (!Regex_Via.test(res.body)) {
+				globalOptions.userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
+				return utils.get('https://www.facebook.com/', jar, null, globalOptions, { noRef: true }).then(utils.saveCookies(jar));
+			}
+			else return res;
+		})
+		.then(res => redirect(res))
+		.then(res => checkAndFixErr(res))
+		.then(function (res) {
+			const html = res.body;
+			const stuff = buildAPI(globalOptions, html, jar);
+			ctx = stuff[0];
+			api = stuff[2];
+			return res;
+		});
+
+	if (globalOptions.pageID) {
+		mainPromise = mainPromise
+			.then(function () {
+				return utils.get('https://www.facebook.com/' + ctx.globalOptions.pageID + '/messages/?section=messages&subsection=inbox', ctx.jar, null, globalOptions);
+			})
+			.then(function (resData) {
+				let url = utils.getFrom(resData.body, 'window.location.replace("https:\\/\\/www.facebook.com\\', '");').split('\\').join('');
+				url = url.substring(0, url.length - 1);
+				return utils.get('https://www.facebook.com' + url, ctx.jar, null, globalOptions);
+			});
+	}
+
+	mainPromise
+		.then(function () {
+			log.info("login", 'Done logging in.');
+			return callback(null, api);
+		})
+		.catch(function (e) {
+			log.error("login", e.error || e);
+			callback(e);
+		});
+}
+
+function login(loginData, options, callback) {
+	if (utils.getType(options) === 'Function' || utils.getType(options) === 'AsyncFunction') {
+		callback = options;
+		options = {};
+	}
+
+	const globalOptions = {
+		selfListen: false,
+		selfListenEvent: false,
+		listenEvents: false,
+		listenTyping: false,
+		updatePresence: false,
+		forceLogin: false,
+		autoMarkDelivery: true,
+		autoMarkRead: false,
+		autoReconnect: true,
+		logRecordSize: defaultLogRecordSize,
+		online: false,
+		emitReady: false,
+		userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_2) AppleWebKit/600.3.18 (KHTML, like Gecko) Version/8.0.3 Safari/600.3.18"
+	};
+
+	setOptions(globalOptions, options);
+
+	let prCallback = null;
+	let returnPromise;
+	if (utils.getType(callback) !== "Function" && utils.getType(callback) !== "AsyncFunction") {
+		let rejectFunc = null;
+		let resolveFunc = null;
+		returnPromise = new Promise(function (resolve, reject) {
+			resolveFunc = resolve;
+			rejectFunc = reject;
+		});
+		prCallback = function (error, api) {
+			if (error) {
+				return rejectFunc(error);
+			}
+			return resolveFunc(api);
+		};
+		callback = prCallback;
+	}
+	loginHelper(loginData.appState, loginData.email, loginData.password, globalOptions, callback, prCallback);
+	return returnPromise;
+}
+
+module.exports = login;
